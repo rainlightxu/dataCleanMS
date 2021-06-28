@@ -1,0 +1,140 @@
+import { login, logout, getInfo } from '@/api/user'
+import { getToken, setToken, removeToken } from '@/utils/auth'
+import router, { resetRouter } from '@/router'
+
+const state = {
+    token: getToken(),
+    name: '',
+    avatar: '',
+    introduction: '',
+    roles: [],
+    UserName: '',
+    UserCode: window.sessionStorage.getItem("userInfo") ?
+        JSON.parse(window.sessionStorage.getItem("userInfo")).UserCode : '',
+    UserGroup: window.sessionStorage.getItem("userInfo") ?
+        JSON.parse(window.sessionStorage.getItem("userInfo")).UserGroup : []
+}
+
+const mutations = {
+    SET_TOKEN: (state, token) => {
+        state.token = token
+    },
+    SET_INTRODUCTION: (state, introduction) => {
+        state.introduction = introduction
+    },
+    SET_NAME: (state, name) => {
+        state.name = name
+    },
+    SET_AVATAR: (state, avatar) => {
+        state.avatar = avatar
+    },
+    SET_ROLES: (state, roles) => {
+        state.roles = roles
+    },
+    SAVE_USERINFO: (state, info) => {
+        sessionStorage.setItem("userInfo", JSON.stringify(info));
+        state.UserName = info.UserName;
+        state.UserCode = info.UserCode;
+        state.UserGroup = info.UserGroup;
+        // console.log(info);
+    }
+}
+
+const actions = {
+    // user login
+    login({ commit }, userInfo) {
+        const { UserCode, PassWord } = userInfo
+        return new Promise((resolve, reject) => {
+            login({ UserCode: UserCode.trim(), PassWord: PassWord }).then(response => {
+                const { data } = response
+                commit('SET_TOKEN', "login")
+                setToken("login")
+                resolve(response)
+            }).catch(error => {
+                reject(error)
+            })
+        })
+    },
+
+    // get user info
+    getInfo({ commit, state }) {
+        return new Promise((resolve, reject) => {
+            getInfo(state.token).then(response => {
+                const { data } = response
+                console.log(response)
+                if (!data) {
+                    reject('Verification failed, please Login again.')
+                }
+
+                const { roles, name, avatar, introduction } = data
+
+                // roles must be a non-empty array
+                if (!roles || roles.length <= 0) {
+                    reject('getInfo: roles must be a non-null array!')
+                }
+
+                commit("SET_ROLES", ["admin"]);
+                commit("SET_NAME", "admin");
+                commit("SET_AVATAR", avatar);
+                commit("SET_INTRODUCTION", introduction);
+                resolve(data)
+            }).catch(error => {
+                reject(error)
+            })
+        })
+    },
+
+    // user logout
+    logout({ commit, state }) {
+        return new Promise((resolve, reject) => {
+            commit("SET_TOKEN", "");
+            commit("SET_ROLES", []);
+            sessionStorage.clear();
+            removeToken();
+            resetRouter();
+            resolve();
+        })
+    },
+
+    // remove token
+    resetToken({ commit }) {
+        return new Promise(resolve => {
+            commit('SET_TOKEN', '')
+            commit('SET_ROLES', [])
+            removeToken()
+            resolve()
+        })
+    },
+
+    // dynamically modify permissions
+    changeRoles({ commit, dispatch }, role) {
+        return new Promise(async resolve => {
+            const token = role + '-token'
+
+            commit('SET_TOKEN', token)
+            setToken(token)
+
+            const { roles } = await dispatch('getInfo')
+
+            resetRouter()
+
+            // generate accessible routes map based on roles
+            const accessRoutes = await dispatch('permission/generateRoutes', roles, { root: true })
+
+            // dynamically add accessible routes
+            router.addRoutes(accessRoutes)
+
+            // reset visited views and cached views
+            dispatch('tagsView/delAllViews', null, { root: true })
+
+            resolve()
+        })
+    }
+}
+
+export default {
+    namespaced: true,
+    state,
+    mutations,
+    actions
+}
